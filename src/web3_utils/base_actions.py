@@ -408,7 +408,7 @@ class Acc(BaseAcc):
                 else f"Transaction data: {data}"
             )
             txn_hash_str, signed_tx = self.sign_tx_with_pk(tx_data)
-            print(f"HEX: {txn_hash_str}")
+            # print(f"HEX: {txn_hash_str}")
             return txn_hash_str, signed_tx
         except NotEnoughBalanceError as e:
             self.logger.error(f"Insufficient funds for transaction: {e}")
@@ -450,7 +450,7 @@ class Acc(BaseAcc):
             )
 
             txn_hash_str, signed_tx = self.sign_tx_with_pk(tx_data)
-            print(f"HEX: {txn_hash_str}")
+            # print(f"HEX: {txn_hash_str}")
             return txn_hash_str
         except NotEnoughBalanceError as e:
             self.logger.error(f"Insufficient funds for transaction: {e}")
