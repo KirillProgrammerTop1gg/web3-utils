@@ -1071,7 +1071,6 @@ class SolAcc(BaseAcc):
             raw_bytes = base64.b64decode(tx_b64)
             tx = VersionedTransaction.from_bytes(raw_bytes)
 
-            # Re-sign with our keypair (replaces placeholder/empty signature)
             msg_bytes = bytes(tx.message)
             signature = self.keypair.sign_message(msg_bytes)
             signed_tx = VersionedTransaction([signature], tx.message)
@@ -1082,7 +1081,7 @@ class SolAcc(BaseAcc):
             )
 
             self.logger.info(f"Versioned tx sent: {result.value}")
-            return str(result.value)
+            return str(result.value), base58.b58encode(bytes(signed_tx)).decode()
 
         except Exception as e:
             self.logger.error(f"Error sending versioned transaction: {e}")
