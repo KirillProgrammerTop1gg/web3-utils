@@ -11,8 +11,6 @@ from .errors import NotEnoughBalanceError
 from pathlib import Path
 from abc import ABC, abstractmethod
 import base64
-import httpx
-from httpx_socks import SyncProxyTransport
 from solana.rpc.api import Client
 from solana.rpc.types import TxOpts
 from solders.keypair import Keypair
@@ -930,11 +928,9 @@ class SolAcc(BaseAcc):
         start_time = time.time()
         try:
             if self.proxy:
-                transport = SyncProxyTransport.from_url(self.proxy)
-                httpx_client = httpx.Client(transport=transport)
                 self.sol_client = Client(
                     "https://api.mainnet.solana.com",
-                    httpx_client=httpx_client,
+                    proxy=self.proxy,
                 )
             else:
                 self.sol_client = Client(
