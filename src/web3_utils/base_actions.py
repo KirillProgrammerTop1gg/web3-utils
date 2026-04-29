@@ -929,12 +929,12 @@ class SolAcc(BaseAcc):
         try:
             if self.proxy:
                 self.sol_client = Client(
-                    "https://api.mainnet.solana.com",
+                    "https://api.mainnet-beta.solana.com",
                     proxy=self.proxy,
                 )
             else:
                 self.sol_client = Client(
-                    "https://api.mainnet.solana.com",
+                    "https://api.mainnet-beta.solana.com",
                 )
 
             if self.sol_client.is_connected():
