@@ -10,6 +10,7 @@ from aiohttp_socks import ProxyConnector
 from .errors import NotEnoughBalanceError
 from pathlib import Path
 from abc import ABC, abstractmethod
+import base64
 from solana.rpc.api import Client
 from solana.rpc.types import TxOpts
 from solders.keypair import Keypair
@@ -1063,6 +1064,29 @@ class SolAcc(BaseAcc):
         raise NotImplementedError(
             "Solana transactions are instruction-based. " "Use do_tx_with_instructions."
         )
+
+    @log_execution_time
+    def do_versioned_tx(self, tx_b64: str) -> str:
+        try:
+            raw_bytes = base64.b64decode(tx_b64)
+            tx = VersionedTransaction.from_bytes(raw_bytes)
+
+            # Re-sign with our keypair (replaces placeholder/empty signature)
+            msg_bytes = bytes(tx.message)
+            signature = self.keypair.sign_message(msg_bytes)
+            signed_tx = VersionedTransaction([signature], tx.message)
+
+            result = self.sol_client.send_raw_transaction(
+                bytes(signed_tx),
+                opts=TxOpts(skip_preflight=False, preflight_commitment="processed"),
+            )
+
+            self.logger.info(f"Versioned tx sent: {result.value}")
+            return str(result.value)
+
+        except Exception as e:
+            self.logger.error(f"Error sending versioned transaction: {e}")
+            raise
 
     @log_execution_time
     def do_tx_with_ABI(
