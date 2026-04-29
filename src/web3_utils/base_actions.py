@@ -81,7 +81,7 @@ class BaseAcc(ABC):
         self.proxy = ""
         if acc[2]:
             ip, port, user, pwd = acc[2].split(":")
-            self.proxy = f"socks5h://{user}:{pwd}@{ip}:{port}"
+            self.proxy = f"socks5://{user}:{pwd}@{ip}:{port}"
         self.web3 = None
         self.logger = self._setup_default_logger(
             logger_level_file,
