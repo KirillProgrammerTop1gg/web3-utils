@@ -1,0 +1,11 @@
+README.md
+pyproject.toml
+src/web3_utils/__init__.py
+src/web3_utils/base_actions.py
+src/web3_utils/erc20.json
+src/web3_utils/errors.py
+src/web3_utils.egg-info/PKG-INFO
+src/web3_utils.egg-info/SOURCES.txt
+src/web3_utils.egg-info/dependency_links.txt
+src/web3_utils.egg-info/requires.txt
+src/web3_utils.egg-info/top_level.txt

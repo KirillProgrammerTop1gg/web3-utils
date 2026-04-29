@@ -11,6 +11,8 @@ from .errors import NotEnoughBalanceError
 from pathlib import Path
 from abc import ABC, abstractmethod
 import base64
+import httpx
+from httpx_socks import SyncProxyTransport
 from solana.rpc.api import Client
 from solana.rpc.types import TxOpts
 from solders.keypair import Keypair
@@ -79,7 +81,7 @@ class BaseAcc(ABC):
         self.proxy = ""
         if acc[2]:
             ip, port, user, pwd = acc[2].split(":")
-            self.proxy = f"socks5://{user}:{pwd}@{ip}:{port}"
+            self.proxy = f"socks5h://{user}:{pwd}@{ip}:{port}"
         self.web3 = None
         self.logger = self._setup_default_logger(
             logger_level_file,
@@ -928,9 +930,11 @@ class SolAcc(BaseAcc):
         start_time = time.time()
         try:
             if self.proxy:
+                transport = SyncProxyTransport.from_url(self.proxy)
+                httpx_client = httpx.Client(transport=transport)
                 self.sol_client = Client(
                     "https://api.mainnet.solana.com",
-                    proxy=self.proxy,
+                    httpx_client=httpx_client,
                 )
             else:
                 self.sol_client = Client(
