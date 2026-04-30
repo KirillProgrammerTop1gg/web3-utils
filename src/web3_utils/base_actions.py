@@ -1164,6 +1164,9 @@ class SolAcc(BaseAcc):
             return balance_raw
             
         except Exception as e:
+            if "could not find account" in str(e).lower() or "invalid param" in str(e).lower():
+                self.logger.debug(f"ATA not found for {token_info.ata} - returning 0")
+                return 0
             self.logger.error(f"Error getting token balance: {e}")
             raise
 
