@@ -17,7 +17,7 @@ from solders.keypair import Keypair
 from solders.transaction import VersionedTransaction
 from solders.message import MessageV0
 from solders.pubkey import Pubkey
-from spl.token.instructions import get_associated_token_address, transfer_checked, TransferCheckedParams
+from spl.token.instructions import get_associated_token_address, transfer_checked, TransferCheckedParams, create_associated_token_account
 from spl.token.constants import TOKEN_PROGRAM_ID
 from dataclasses import dataclass
 
@@ -1182,20 +1182,31 @@ class SolAcc(BaseAcc):
         try:
             to_pubkey = Pubkey.from_string(to_address)
             dest_ata = get_associated_token_address(to_pubkey, token_info.mint)
-            
+
             if amount_type == "token":
                 amount_raw = int(amount * 10 ** token_info.decimals)
             else:
                 amount_raw = int(amount)
-            
+
             readable = amount_raw / 10 ** token_info.decimals
-            
             self.logger.info(
                 f"Transferring token: to={to_address[:6]}...{to_address[-4:]}, "
                 f"amount={readable} ({amount_raw} raw)"
             )
-            
-            instruction = transfer_checked(
+
+            instructions = []
+
+            dest_account_info = self.sol_client.get_account_info(dest_ata)
+            if dest_account_info.value is None:
+                self.logger.info(f"dest ATA doesn't exist, creating...")
+                create_ata_ix = create_associated_token_account(
+                    payer=self.pubkey,
+                    owner=to_pubkey,
+                    mint=token_info.mint,
+                )
+                instructions.append(create_ata_ix)
+
+            transfer_ix = transfer_checked(
                 TransferCheckedParams(
                     program_id=TOKEN_PROGRAM_ID,
                     source=token_info.ata,
@@ -1207,9 +1218,10 @@ class SolAcc(BaseAcc):
                     signers=[],
                 )
             )
-            
-            return self.do_tx_with_instructions([instruction])
-            
+            instructions.append(transfer_ix)
+
+            return self.do_tx_with_instructions(instructions)
+
         except Exception as e:
             self.logger.error(f"Error transferring token: {e}")
             raise
