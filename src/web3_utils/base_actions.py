@@ -16,6 +16,10 @@ from solana.rpc.types import TxOpts
 from solders.keypair import Keypair
 from solders.transaction import VersionedTransaction
 from solders.message import MessageV0
+from solders.pubkey import Pubkey
+from spl.token.instructions import get_associated_token_address, transfer_checked, TransferCheckedParams
+from spl.token.constants import TOKEN_PROGRAM_ID
+from dataclasses import dataclass
 
 BASE_DIR = Path(__file__).resolve().parent
 ERC20_ABI_PATH = BASE_DIR / "erc20.json"
@@ -59,6 +63,15 @@ def log_async_execution_time(func: F) -> F:
 
     return wrapper
 
+@dataclass
+class SolTokenInfo:
+    mint: Pubkey
+    mint_str: str
+    decimals: int
+    ata: Pubkey
+
+    def __repr__(self):
+        return f"SolToken({self.mint_str[:6]}...{self.mint_str[-4:]}, decimals={self.decimals})"
 
 class BaseAcc(ABC):
     min_need_value = 0.000001
@@ -930,7 +943,7 @@ class SolAcc(BaseAcc):
             if self.proxy:
                 self.sol_client = Client(
                     "https://api.mainnet-beta.solana.com",
-                    proxy=self.proxy,
+                    proxy=self.proxy.replace('socks5','socks5h'),
                 )
             else:
                 self.sol_client = Client(
@@ -1025,6 +1038,28 @@ class SolAcc(BaseAcc):
         return signed_tx.value
 
     @log_execution_time
+    def do_versioned_tx(self, tx_b64: str) -> str:
+        try:
+            raw_bytes = base64.b64decode(tx_b64)
+            tx = VersionedTransaction.from_bytes(raw_bytes)
+
+            msg_bytes = bytes(tx.message)
+            signature = self.keypair.sign_message(msg_bytes)
+            signed_tx = VersionedTransaction(tx.message, [self.keypair])
+
+            result = self.sol_client.send_raw_transaction(
+                bytes(signed_tx),
+                opts=TxOpts(skip_preflight=False, preflight_commitment="processed"),
+            )
+
+            self.logger.info(f"Versioned tx sent: {result.value}")
+            return str(result.value), base58.b58encode(bytes(signed_tx)).decode()
+
+        except Exception as e:
+            self.logger.error(f"Error sending versioned transaction: {e}")
+            raise
+
+    @log_execution_time
     def get_gas_params(self) -> Dict[str, int]:
         self.logger.warning(
             "get_gas_params is not applicable to Solana. "
@@ -1066,28 +1101,6 @@ class SolAcc(BaseAcc):
         )
 
     @log_execution_time
-    def do_versioned_tx(self, tx_b64: str) -> str:
-        try:
-            raw_bytes = base64.b64decode(tx_b64)
-            tx = VersionedTransaction.from_bytes(raw_bytes)
-
-            msg_bytes = bytes(tx.message)
-            signature = self.keypair.sign_message(msg_bytes)
-            signed_tx = VersionedTransaction([signature], tx.message)
-
-            result = self.sol_client.send_raw_transaction(
-                bytes(signed_tx),
-                opts=TxOpts(skip_preflight=False, preflight_commitment="processed"),
-            )
-
-            self.logger.info(f"Versioned tx sent: {result.value}")
-            return str(result.value), base58.b58encode(bytes(signed_tx)).decode()
-
-        except Exception as e:
-            self.logger.error(f"Error sending versioned transaction: {e}")
-            raise
-
-    @log_execution_time
     def do_tx_with_ABI(
         self,
         tx_func_abi: Any,
@@ -1104,64 +1117,96 @@ class SolAcc(BaseAcc):
             "Solana is instruction-based (IDL). " "Use do_tx_with_instructions."
         )
 
+
     @log_execution_time
-    def get_token_contract(self, token_contract_address: str) -> Contract:
+    def get_token_contract(self, token_mint_address: str) -> SolTokenInfo:
         try:
-            self.logger.debug(f"Getting token contract: {token_contract_address}")
-            token_contract = self.web3.eth.contract(
-                address=self.web3.to_checksum_address(token_contract_address),
-                abi=erc20_ABI,
+            self.logger.debug(f"Getting token info: {token_mint_address}")
+            
+            mint_pubkey = Pubkey.from_string(token_mint_address)
+            
+            mint_info = self.sol_client.get_account_info_json_parsed(mint_pubkey)
+            decimals = mint_info.value.data.parsed["info"]["decimals"]
+            
+            ata = get_associated_token_address(self.pubkey, mint_pubkey)
+            
+            token_info = SolTokenInfo(
+                mint=mint_pubkey,
+                mint_str=token_mint_address,
+                decimals=decimals,
+                ata=ata,
             )
+            
             self.logger.info(
-                f"✓ Token contract loaded: {token_contract_address[:6]}...{token_contract_address[-4:]}"
+                f"✓ Token loaded: {token_mint_address[:6]}...{token_mint_address[-4:]}"
+                f" | decimals={decimals} | ATA={str(ata)[:6]}...{str(ata)[-4:]}"
             )
-            return token_contract
+            return token_info
+            
         except Exception as e:
-            self.logger.error(f"Error getting token contract: {e}")
+            self.logger.error(f"Error getting token info: {e}")
             raise
 
+
     @log_execution_time
-    def get_token_balance(self, token_contract: Contract) -> int:
+    def get_token_balance(self, token_info: SolTokenInfo) -> int:
         try:
             self.logger.debug(
-                f"Requesting token balance for {self.address[:6]}...{self.address[-4:]}"
+                f"Requesting token balance for {str(self.pubkey)[:6]}...{str(self.pubkey)[-4:]}"
             )
-            balance = token_contract.functions.balanceOf(
-                self.web3.to_checksum_address(self.address)
-            ).call()
-
-            try:
-                decimals = token_contract.functions.decimals().call()
-                readable_balance = balance / (10**decimals)
-                self.logger.info(f"Token balance: {readable_balance} ({balance} wei)")
-            except:
-                self.logger.info(f"Token balance: {balance} wei")
-
-            return balance
+            
+            resp = self.sol_client.get_token_account_balance(token_info.ata, commitment="confirmed")
+            
+            balance_raw = int(resp.value.amount)
+            readable = balance_raw / 10 ** token_info.decimals
+            
+            self.logger.info(f"Token balance: {readable} ({balance_raw} raw)")
+            return balance_raw
+            
         except Exception as e:
             self.logger.error(f"Error getting token balance: {e}")
             raise
 
+
     @log_execution_time
     def transfer_token_to_address(
         self,
-        token_contract: Contract,
+        token_info: SolTokenInfo,
         to_address: str,
         amount: float,
-        amount_type: Literal["wei", "ether"] = "wei",
-        gas_limit: int = 150000,
-    ) -> None:
+        amount_type: Literal["raw", "token"] = "token",
+    ) -> str:
         try:
+            to_pubkey = Pubkey.from_string(to_address)
+            dest_ata = get_associated_token_address(to_pubkey, token_info.mint)
+            
+            if amount_type == "token":
+                amount_raw = int(amount * 10 ** token_info.decimals)
+            else:
+                amount_raw = int(amount)
+            
+            readable = amount_raw / 10 ** token_info.decimals
+            
             self.logger.info(
                 f"Transferring token: to={to_address[:6]}...{to_address[-4:]}, "
-                f"amount={amount} {amount_type}, gas_limit={gas_limit}"
+                f"amount={readable} ({amount_raw} raw)"
             )
-
-            tx_data = token_contract.functions.transfer(
-                self.web3.to_checksum_address(to_address),
-                amount if amount_type == "wei" else self.web3.to_wei(amount, "ether"),
+            
+            instruction = transfer_checked(
+                TransferCheckedParams(
+                    program_id=TOKEN_PROGRAM_ID,
+                    source=token_info.ata,
+                    mint=token_info.mint,
+                    dest=dest_ata,
+                    owner=self.pubkey,
+                    amount=amount_raw,
+                    decimals=token_info.decimals,
+                    signers=[],
+                )
             )
-            return self.do_tx_with_ABI(tx_data, 0, gas_limit)
+            
+            return self.do_tx_with_instructions([instruction])
+            
         except Exception as e:
             self.logger.error(f"Error transferring token: {e}")
             raise
