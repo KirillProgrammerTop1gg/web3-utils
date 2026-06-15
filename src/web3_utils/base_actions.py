@@ -18,7 +18,7 @@ from solders.transaction import VersionedTransaction
 from solders.message import MessageV0
 from solders.pubkey import Pubkey
 from spl.token.instructions import get_associated_token_address, transfer_checked, TransferCheckedParams, create_associated_token_account
-from spl.token.constants import TOKEN_PROGRAM_ID
+from spl.token.constants import TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID
 from dataclasses import dataclass
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -69,6 +69,7 @@ class SolTokenInfo:
     mint_str: str
     decimals: int
     ata: Pubkey
+    token_program_id: Pubkey = TOKEN_PROGRAM_ID
 
     def __repr__(self):
         return f"SolToken({self.mint_str[:6]}...{self.mint_str[-4:]}, decimals={self.decimals})"
@@ -1122,27 +1123,31 @@ class SolAcc(BaseAcc):
     def get_token_contract(self, token_mint_address: str) -> SolTokenInfo:
         try:
             self.logger.debug(f"Getting token info: {token_mint_address}")
-            
+
             mint_pubkey = Pubkey.from_string(token_mint_address)
-            
+
             mint_info = self.sol_client.get_account_info_json_parsed(mint_pubkey)
             decimals = mint_info.value.data.parsed["info"]["decimals"]
-            
-            ata = get_associated_token_address(self.pubkey, mint_pubkey)
-            
+
+            owner_program = mint_info.value.owner
+            token_program_id = owner_program
+
+            ata = get_associated_token_address(self.pubkey, mint_pubkey, token_program_id)
+
             token_info = SolTokenInfo(
                 mint=mint_pubkey,
                 mint_str=token_mint_address,
                 decimals=decimals,
                 ata=ata,
+                token_program_id=token_program_id,  # добавить это поле в SolTokenInfo
             )
-            
+
             self.logger.info(
                 f"✓ Token loaded: {token_mint_address[:6]}...{token_mint_address[-4:]}"
                 f" | decimals={decimals} | ATA={str(ata)[:6]}...{str(ata)[-4:]}"
             )
             return token_info
-            
+
         except Exception as e:
             self.logger.error(f"Error getting token info: {e}")
             raise
@@ -1154,15 +1159,15 @@ class SolAcc(BaseAcc):
             self.logger.debug(
                 f"Requesting token balance for {str(self.pubkey)[:6]}...{str(self.pubkey)[-4:]}"
             )
-            
+
             resp = self.sol_client.get_token_account_balance(token_info.ata, commitment="confirmed")
-            
+
             balance_raw = int(resp.value.amount)
             readable = balance_raw / 10 ** token_info.decimals
-            
+
             self.logger.info(f"Token balance: {readable} ({balance_raw} raw)")
             return balance_raw
-            
+
         except Exception as e:
             if "could not find account" in str(e).lower() or "invalid param" in str(e).lower():
                 self.logger.debug(f"ATA not found for {token_info.ata} - returning 0")
@@ -1181,7 +1186,9 @@ class SolAcc(BaseAcc):
     ) -> str:
         try:
             to_pubkey = Pubkey.from_string(to_address)
-            dest_ata = get_associated_token_address(to_pubkey, token_info.mint)
+            dest_ata = get_associated_token_address(
+                to_pubkey, token_info.mint, token_info.token_program_id
+            )
 
             if amount_type == "token":
                 amount_raw = int(amount * 10 ** token_info.decimals)
@@ -1203,12 +1210,13 @@ class SolAcc(BaseAcc):
                     payer=self.pubkey,
                     owner=to_pubkey,
                     mint=token_info.mint,
+                    token_program_id=token_info.token_program_id,
                 )
                 instructions.append(create_ata_ix)
 
             transfer_ix = transfer_checked(
                 TransferCheckedParams(
-                    program_id=TOKEN_PROGRAM_ID,
+                    program_id=token_info.token_program_id,
                     source=token_info.ata,
                     mint=token_info.mint,
                     dest=dest_ata,
