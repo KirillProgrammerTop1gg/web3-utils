@@ -990,7 +990,7 @@ class SolAcc(BaseAcc):
             self.logger.debug(
                 f"Requesting balance for {self.address[:6]}...{self.address[-4:]}"
             )
-            balance = self.sol_client.get_balance(self.pubkey).value
+            balance = self.sol_client.get_balance(self.pubkey, commitment="confirmed").value
             result = self.from_lamports(balance, result_type)
             self.logger.info(f"Balance: {result} {result_type.upper()}")
             return result
